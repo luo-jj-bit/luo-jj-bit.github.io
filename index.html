@@ -434,7 +434,7 @@
             <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
                 <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/>
             </svg>
-            立即购买
+            立即购买 ¥0.01
         </button>
     </div>
 
@@ -450,7 +450,7 @@
                 <div class="qr-section">
                     <div class="qr-label">📱 扫码添加客服微信</div>
                     <div class="qr-code">
-                        <!-- 通过JS动态设置真实二维码图片（保证微信长按可识别） -->
+                        <!-- 通过 JS 动态设置真实二维码图片（保证微信长按可识别） -->
                         <img id="qrCodeImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect fill='%23fff' width='100' height='100'/%3E%3Cg fill='%23333'%3E%3Crect x='10' y='10' width='25' height='25'/%3E%3Crect x='65' y='10' width='25' height='25'/%3E%3Crect x='10' y='65' width='25' height='25'/%3E%3Crect x='45' y='45' width='10' height='10'/%3E%3Crect x='65' y='65' width='10' height='10'/%3E%3C/g%3E%3C/svg%3E" alt="客服微信二维码">
                     </div>
                     <div class="qr-tip">长按图片识别二维码</div>
@@ -489,10 +489,12 @@
     <div class="toast" id="toast"></div>
 
     <script>
-        // 配置信息（请根据实际客服信息修改）
+        // 配置信息（请根据实际信息修改）
         const CONFIG = {
-            customerPhone: '400-888-8888',          // 客服电话
-            customerWechat: 'nanguangkefu'           // 客服微信号 (用于二维码和复制)
+            customerPhone: '400-888-8888',      // 客服电话
+            customerWechat: 'nanguangkefu',     // 客服微信号
+            payAmount: 0.01,                    // 支付金额（元）
+            payApi: '/api/create-wechat-pay'    // 支付接口地址
         };
 
         // 显示提示
@@ -529,7 +531,6 @@
         // 复制微信号 (适配微信浏览器)
         function copyWechat() {
             const wechat = CONFIG.customerWechat;
-            // 使用现代clipboard API，如果不支持则降级
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(wechat).then(() => {
                     showToast('✅ 微信号已复制');
@@ -557,16 +558,84 @@
             document.body.removeChild(textarea);
         }
 
-        // 立即购买功能
+        // 立即购买 - 微信支付
         function buyNow() {
-            showToast('🛒 即将跳转支付...');
-            setTimeout(() => {
-                // 实际开发可跳转至支付页面
-                // window.location.href = '/buy.html';
-            }, 1500);
+            showToast('⏳ 正在创建支付订单...');
+            
+            // 检查是否在微信环境
+            const isWechat = /micromessenger/i.test(navigator.userAgent);
+            if (!isWechat) {
+                showToast('⚠️ 请在微信内打开支付');
+                return;
+            }
+            
+            // 调用支付
+            createWechatPayOrder(CONFIG.payAmount);
         }
 
-        // 初始化页面：填充电话、微信号，并设置真实二维码图片 (使微信长按可识别)
+        // 创建支付订单
+        function createWechatPayOrder(amount) {
+            // 生成订单号
+            const orderId = 'ORDER_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            // 调用后端接口（需要后端配合）
+            fetch(CONFIG.payApi, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    amount: amount,
+                    orderId: orderId,
+                    description: '唯美口腔开业优惠体验'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.code === 200 && data.payParams) {
+                    invokeWechatPay(data.payParams);
+                } else {
+                    showToast('❌ 订单创建失败');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                showToast('❌ 网络错误，请重试');
+            });
+        }
+
+        // 调用微信支付
+        function invokeWechatPay(payParams) {
+            if (typeof WeixinJSBridge !== 'undefined') {
+                WeixinJSBridge.invoke(
+                    'getBrandWCPayRequest',
+                    payParams,
+                    function(res) {
+                        if (res.err_name === 'get_brand_wcpay_request:ok') {
+                            showToast('✅ 支付成功');
+                            setTimeout(() => {
+                                window.location.href = '/success.html';
+                            }, 1500);
+                        } else if (res.err_name === 'get_brand_wcpay_request:cancel') {
+                            showToast('💰 支付已取消');
+                        } else {
+                            showToast('❌ 支付失败，请重试');
+                        }
+                    }
+                );
+            } else {
+                // 等待微信桥接就绪
+                if (typeof WeixinJSBridge === 'undefined') {
+                    document.addEventListener('WeixinJSBridgeReady', function() {
+                        invokeWechatPay(payParams);
+                    }, false);
+                } else {
+                    showToast('⚠️ 请在微信内打开支付');
+                }
+            }
+        }
+
+        // 初始化页面
         document.addEventListener('DOMContentLoaded', function() {
             // 填充电话号码
             document.getElementById('phoneNumber').textContent = CONFIG.customerPhone;
@@ -577,24 +646,17 @@
                 wechatSpan.textContent = CONFIG.customerWechat;
             }
 
-            // 设置真实二维码图片 (使用公共API生成包含微信号的二维码，确保长按可识别)
+            // 设置真实二维码图片
             const qrImg = document.getElementById('qrCodeImg');
             if (qrImg) {
-                // 使用稳定可靠的QR生成服务（支持https）
                 qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(CONFIG.customerWechat);
-                // 可选备用：如果图片加载失败，保留原有SVG占位
                 qrImg.onerror = function() {
-                    // 如果API加载失败，使用原有SVG占位（至少美观），但可提示用户复制微信号
                     qrImg.src = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 100 100\'%3E%3Crect fill=\'%23fff\' width=\'100\' height=\'100\'/%3E%3Cg fill=\'%23333\'%3E%3Crect x=\'10\' y=\'10\' width=\'25\' height=\'25\'/%3E%3Crect x=\'65\' y=\'10\' width=\'25\' height=\'25\'/%3E%3Crect x=\'10\' y=\'65\' width=\'25\' height=\'25\'/%3E%3Crect x=\'45\' y=\'45\' width=\'10\' height=\'10\'/%3E%3Crect x=\'65\' y=\'65\' width=\'10\' height=\'10\'/%3E%3C/g%3E%3C/svg%3E';
                 };
             }
 
-            console.log('页面已适配微信，可正常在朋友圈打开');
+            console.log('页面已适配微信支付，金额：¥' + CONFIG.payAmount);
         });
-
-        // 重要：移除禁止contextmenu的代码，让微信长按菜单（识别二维码）正常工作
-        // 原代码中有一行 document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
-        // 现已完全删除，确保二维码可被长按识别。
     </script>
 </body>
 </html>
